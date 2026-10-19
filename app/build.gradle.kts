@@ -40,6 +40,9 @@ android {
         compose = true
         buildConfig = true
     }
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+    }
     dependenciesInfo {
         includeInBundle = false
         includeInApk = false

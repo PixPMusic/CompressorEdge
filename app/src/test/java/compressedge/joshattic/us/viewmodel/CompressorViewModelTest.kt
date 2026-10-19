@@ -1,6 +1,10 @@
 package compressedge.joshattic.us.viewmodel
 
 import android.app.Application
+import android.content.Context
+import android.media.MediaCodecList
+import android.media.MediaExtractor
+import android.net.Uri
 import androidx.media3.common.MimeTypes
 import androidx.test.core.app.ApplicationProvider
 import compressedge.joshattic.us.model.CompressorUiState
@@ -10,6 +14,8 @@ import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.mockito.Mockito.mockConstruction
+import org.mockito.Mockito.`when`
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
@@ -108,6 +114,46 @@ class CompressorViewModelTest {
         assertEquals(MimeTypes.VIDEO_H264, viewModel.uiState.value.videoCodec)
         assertFalse(viewModel.uiState.value.useH265)
         assertEquals(QualityPreset.CUSTOM, viewModel.uiState.value.activePreset)
+    }
+
+    @Test
+    fun dolbyVisionWithoutAdvertisedDecoderReachesOutputPlanning() {
+        val error = planWithNoAdvertisedCodecs(MimeTypes.VIDEO_DOLBY_VISION)
+        assertTrue(error.startsWith("This device can't encode"))
+    }
+
+    @Test
+    fun unsupportedHevcStillReportsDecoderFailure() {
+        val error = planWithNoAdvertisedCodecs(MimeTypes.VIDEO_H265)
+        assertEquals(
+            application.getString(
+                compressedge.joshattic.us.R.string.error_decoder_config_unsupported_details,
+                3840, 2160, 60f, "hevc"
+            ),
+            error
+        )
+    }
+
+    private fun planWithNoAdvertisedCodecs(sourceMime: String): String {
+        // Model the failing phone: no decoder advertises Dolby Vision. A source
+        // probe with no tracks falls back to the metadata already in UI state.
+        mockConstruction(MediaExtractor::class.java).use {
+            mockConstruction(MediaCodecList::class.java) { codecList, _ ->
+                `when`(codecList.codecInfos).thenReturn(emptyArray())
+            }.use {
+                val method = CompressorViewModel::class.java.getDeclaredMethod(
+                    "buildCompressionPlan", Context::class.java, CompressorUiState::class.java,
+                    Uri::class.java, Int::class.javaPrimitiveType, Int::class.javaPrimitiveType
+                ).apply { isAccessible = true }
+                val state = CompressorUiState(
+                    originalVideoMime = sourceMime, originalWidth = 3840,
+                    originalHeight = 2160, originalFps = 60f
+                )
+                val plan = method.invoke(viewModel, application, state, Uri.EMPTY, 2160, 0)
+                return plan.javaClass.getDeclaredMethod("getBlockingError")
+                    .apply { isAccessible = true }.invoke(plan) as String
+            }
+        }
     }
 
     @Test
